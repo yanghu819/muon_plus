@@ -46,3 +46,11 @@ in TorchInductor/PTX compilation before producing one training step. That is not
 a useful smoke signal and does not reuse enough work for the full 12-layer
 baseline. Smoke materialization now skips `torch.compile`; full mode still uses
 the upstream compile path unchanged.
+
+The first exact Muon-1 full attempt on GPU2 reached step 41 with a stable
+post-warmup step average around 2523 ms. At that rate, 6200 training steps alone
+need about 4.3 hours before validation overhead, which exceeds a single
+AIStation GPU2 lease. Full-mode materialization now saves checkpoints every 100
+steps by default and supports `RESUME_CHECKPOINT`/`RESUME_STEP`; this preserves
+the baseline training path while making completion across GPU2 restarts
+practical.

@@ -48,6 +48,45 @@ def patch_smoke_1(text: str) -> str:
     return text
 
 
+def patch_resumable_full_1(text: str) -> str:
+    text = replace_once(
+        text,
+        "save_every : int = 0 # every how many steps to save the checkpoint? 0 for only at the end",
+        "save_every : int = int(os.environ.get(\"SAVE_EVERY\", \"100\")) # every how many steps to save the checkpoint? 0 for only at the end",
+    )
+    text = replace_once(
+        text,
+        "schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]",
+        "schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]\n\n"
+        "resume_step = int(os.environ.get(\"RESUME_STEP\", \"0\"))\n"
+        "resume_checkpoint = os.environ.get(\"RESUME_CHECKPOINT\", \"\")\n"
+        "if resume_checkpoint:\n"
+        "    ckpt = torch.load(resume_checkpoint, map_location=\"cuda\")\n"
+        "    resume_step = int(ckpt[\"step\"])\n"
+        "    raw_model.load_state_dict(ckpt[\"model\"])\n"
+        "    for opt, state in zip(optimizers, ckpt[\"optimizers\"]):\n"
+        "        opt.load_state_dict(state)\n"
+        "    for sched, state in zip(schedulers, ckpt.get(\"schedulers\", [])):\n"
+        "        sched.load_state_dict(state)\n"
+        "    print(f\"resuming from {resume_checkpoint} at step {resume_step}\")",
+    )
+    text = replace_once(
+        text,
+        "log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])",
+        "log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers], schedulers=[sched.state_dict() for sched in schedulers])",
+    )
+    text = replace_once(
+        text,
+        "train_loader.reset()\nfor step in range(args.num_iterations + 1):",
+        "train_loader.reset()\n"
+        "if resume_step > 0:\n"
+        "    for _ in range(resume_step * train_accumulation_steps):\n"
+        "        x, y = train_loader.next_batch()\n"
+        "for step in range(resume_step, args.num_iterations + 1):",
+    )
+    return text
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True)
@@ -75,6 +114,8 @@ def main() -> None:
     )
     if args.mode == "smoke":
         text = patch_smoke_1(text)
+    elif args.method.endswith("1"):
+        text = patch_resumable_full_1(text)
 
     banner = (
         f"# Materialized by scripts/materialize_train.py from {source.name}\n"
