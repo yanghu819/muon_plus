@@ -1,0 +1,16 @@
+.venv/
+.cache/
+.local/
+artifacts/
+models/
+runs/
+logs/
+data/fineweb10B/
+*.pt
+*.pth
+*.ckpt
+*.bin
+__pycache__/
+*.py[cod]
+.DS_Store
+

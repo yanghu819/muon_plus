@@ -1,0 +1,50 @@
+certifi==2026.6.17
+    # via requests
+charset-normalizer==3.4.7
+    # via requests
+colorama==0.4.6 ; sys_platform == 'win32'
+    # via tqdm
+filelock==3.29.4
+    # via huggingface-hub
+fsspec==2026.6.0
+    # via huggingface-hub
+hf-xet==1.5.1 ; platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'
+    # via huggingface-hub
+huggingface-hub==0.36.2
+    # via
+    #   kernels
+    #   muon-plus
+idna==3.18
+    # via requests
+kernels==0.12.3
+    # via muon-plus
+numpy==2.2.6 ; python_full_version < '3.11'
+    # via muon-plus
+numpy==2.4.6 ; python_full_version == '3.11.*'
+    # via muon-plus
+numpy==2.5.0 ; python_full_version >= '3.12'
+    # via muon-plus
+packaging==26.2
+    # via
+    #   huggingface-hub
+    #   kernels
+pyyaml==6.0.3
+    # via
+    #   huggingface-hub
+    #   kernels
+requests==2.34.2
+    # via huggingface-hub
+setuptools==80.10.2
+    # via muon-plus
+tomli==2.4.1 ; python_full_version < '3.11'
+    # via kernels
+tqdm==4.68.3
+    # via
+    #   huggingface-hub
+    #   muon-plus
+typing-extensions==4.15.0
+    # via
+    #   huggingface-hub
+    #   muon-plus
+urllib3==2.7.0
+    # via requests

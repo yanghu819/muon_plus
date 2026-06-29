@@ -1,0 +1,17 @@
+[project]
+name = "muon-plus"
+version = "0.1.0"
+description = "Reproduction harness for zhehangdu/Newton-Muon baselines"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "huggingface-hub>=0.36.0,<1.0",
+    "kernels>=0.11.1,<1.0",
+    "numpy>=2.0.0,<3.0",
+    "setuptools>=80.0.0,<81.0",
+    "tqdm>=4.67.0,<5.0",
+    "typing-extensions>=4.15.0,<5.0",
+]
+
+[tool.uv]
+package = false
+

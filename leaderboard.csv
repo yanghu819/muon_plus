@@ -1,0 +1,1 @@
+run_id,method,mode,status,git_sha,final_val_loss,paper_loss,loss_delta,train_time_s,paper_time_s,started_at,finished_at
