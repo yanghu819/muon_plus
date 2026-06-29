@@ -1,7 +1,6 @@
 import torch
 import triton
 import triton.language as tl
-from triton.tools.tensor_descriptor import TensorDescriptor
 
 # -----------------------------------------------------------------------------
 # Triton kernel for symmetric matrix multiplication by @byronxu99
@@ -325,6 +324,15 @@ def linear_relu_square_kernel(a_desc, b_desc, c_desc, aux_desc,
 
 
 def linear_relu_square(a, b, aux=None):
+    try:
+        from triton.tools.tensor_descriptor import TensorDescriptor
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "linear_relu_square requires a Triton build that provides "
+            "triton.tools.tensor_descriptor. The Newton-Muon-1 scripts only "
+            "use XXT and ba_plus_cAA, so this path should not be reached there."
+        ) from exc
+
     M, K = a.shape
     N, K = b.shape
     dtype = a.dtype

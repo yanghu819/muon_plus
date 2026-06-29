@@ -31,3 +31,12 @@ Kill criteria: stop before a full run if smoke fails, FineWeb shard verification
 
 Next decision unlocked: once muon1 is reproduced, run newton_muon1 under the same harness and compare loss delta against the reported 0.0182 improvement over Muon.
 
+## 2026-06-29 Smoke Lesson
+
+The AIStation GPU2 base image provides PyTorch 2.7.0+cu126 with Triton 3.3.0.
+That Triton build does not expose `triton.tools.tensor_descriptor`, while the
+upstream `triton_kernels.py` imported it at module import time. The Muon-1 and
+Newton-Muon-1 scripts only need `XXT` and `ba_plus_cAA`, so the safe fix is to
+delay the TensorDescriptor import until `linear_relu_square()` is actually used.
+This keeps the Newton-Muon-1 baseline path unchanged and avoids downloading a
+large or mismatched torch/triton stack into the project environment.
