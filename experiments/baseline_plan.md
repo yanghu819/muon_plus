@@ -40,3 +40,9 @@ Newton-Muon-1 scripts only need `XXT` and `ba_plus_cAA`, so the safe fix is to
 delay the TensorDescriptor import until `linear_relu_square()` is actually used.
 This keeps the Newton-Muon-1 baseline path unchanged and avoids downloading a
 large or mismatched torch/triton stack into the project environment.
+
+The second smoke attempt showed that tiny-shape `torch.compile` spends minutes
+in TorchInductor/PTX compilation before producing one training step. That is not
+a useful smoke signal and does not reuse enough work for the full 12-layer
+baseline. Smoke materialization now skips `torch.compile`; full mode still uses
+the upstream compile path unchanged.

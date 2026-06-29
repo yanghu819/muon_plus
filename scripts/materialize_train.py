@@ -41,6 +41,7 @@ def patch_smoke_1(text: str) -> str:
             "GPT(GPTConfig(vocab_size=num_vocab, n_layer=12, n_head=12, n_embd=768))",
             "GPT(GPTConfig(vocab_size=num_vocab, n_layer=2, n_head=2, n_embd=128))",
         ),
+        ("model = torch.compile(model)", "model = model  # smoke: skip torch.compile startup cost"),
     ]
     for old, new in replacements:
         text = replace_once(text, old, new)
@@ -87,4 +88,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
