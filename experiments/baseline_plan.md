@@ -62,3 +62,30 @@ has explicit `current_shard/current_position` state, so resume now seeks
 directly to the target batch and checkpoints carry `training_time_ms`. For old
 checkpoints without that field, pass `RESUME_TRAIN_TIME_MS` from the previous
 segment log.
+
+## Next Experiment: Newton-Muon-1
+
+Insight: after Muon-1 reproduced within `+0.0020` loss of the paper, the
+highest-value next check is the paper's actual optimizer delta, not an AdamW
+grid or formatting ablation.
+
+Mechanism: run `newton_muon1` with the same FineWeb shards, harness, checkpoint
+resume, and single GPU2 environment. This isolates the right-preconditioner
+change against the now-validated Muon baseline path.
+
+Prediction: final validation loss should land near the paper value `3.2611`,
+roughly `0.0182` below the Muon paper baseline and about `0.0202` below this
+GPU2 Muon reproduction.
+
+Expected upside: if it matches, the repo is ready as a reliable baseline for
+optimizer changes. If it misses, the next investigation should focus on
+Newton-Muon-specific preconditioner state, kernel behavior, or checkpoint
+resume state rather than data/dependency issues.
+
+Budget: one full `_1` run, expected to need multiple AIStation lease segments
+at about Muon-1 speed. Use checkpoint resume; do not run AdamW unless the
+Newton-Muon result creates a specific diagnostic need.
+
+Kill criteria: stop before full if smoke fails, CUDA/kernel registration fails,
+FineWeb verification fails, or resume cannot preserve optimizer/preconditioner
+state.
