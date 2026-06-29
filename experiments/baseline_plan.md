@@ -54,3 +54,11 @@ AIStation GPU2 lease. Full-mode materialization now saves checkpoints every 100
 steps by default and supports `RESUME_CHECKPOINT`/`RESUME_STEP`; this preserves
 the baseline training path while making completion across GPU2 restarts
 practical.
+
+The first resume attempt from `state_step002100.pt` exposed a hidden recovery
+cost: iterating `resume_step * train_accumulation_steps` batches burned more
+than 15 minutes of CPU time with the GPU idle. The loader is deterministic and
+has explicit `current_shard/current_position` state, so resume now seeks
+directly to the target batch and checkpoints carry `training_time_ms`. For old
+checkpoints without that field, pass `RESUME_TRAIN_TIME_MS` from the previous
+segment log.

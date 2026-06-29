@@ -49,20 +49,59 @@ def patch_smoke_1(text: str) -> str:
 
 
 def patch_resumable_full_1(text: str) -> str:
+    save_every_replaced = False
+    for old in (
+        "save_every : int = 0 # every how many steps to save the checkpoint? 0 for only at the end",
+        "save_every : int = 0",
+    ):
+        if old in text:
+            text = replace_once(
+                text,
+                old,
+                "save_every : int = int(os.environ.get(\"SAVE_EVERY\", \"100\")) # every how many steps to save the checkpoint? 0 for only at the end",
+            )
+            save_every_replaced = True
+            break
+    if not save_every_replaced:
+        raise SystemExit("could not find save_every hyperparameter")
     text = replace_once(
         text,
-        "save_every : int = 0 # every how many steps to save the checkpoint? 0 for only at the end",
-        "save_every : int = int(os.environ.get(\"SAVE_EVERY\", \"100\")) # every how many steps to save the checkpoint? 0 for only at the end",
+        "    def next_batch(self):\n"
+        "        B = self.B\n"
+        "        T = self.T\n"
+        "        buf = self.tokens[self.current_position : self.current_position+B*T+1]\n",
+        "    def seek_batch(self, batch_index):\n"
+        "        stride = self.B * self.T * self.num_processes\n"
+        "        offset = self.process_rank * self.B * self.T\n"
+        "        shard_sizes = [_peek_data_shard(fname) for fname in self.files]\n"
+        "        shard_batches = [max(0, (size - offset - stride - 1) // stride + 1) for size in shard_sizes]\n"
+        "        total_batches = sum(shard_batches)\n"
+        "        assert total_batches > 0\n"
+        "        batch_index = batch_index % total_batches\n"
+        "        for shard, count in enumerate(shard_batches):\n"
+        "            if batch_index < count:\n"
+        "                self.current_shard = shard\n"
+        "                self.current_position = offset + batch_index * stride\n"
+        "                self.tokens = _load_data_shard(self.files[self.current_shard])\n"
+        "                return self.next_batch()\n"
+        "            batch_index -= count\n"
+        "        raise RuntimeError(\"failed to seek dataloader batch\")\n\n"
+        "    def next_batch(self):\n"
+        "        B = self.B\n"
+        "        T = self.T\n"
+        "        buf = self.tokens[self.current_position : self.current_position+B*T+1]\n",
     )
     text = replace_once(
         text,
         "schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]",
         "schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]\n\n"
+        "resume_training_time_ms = float(os.environ.get(\"RESUME_TRAIN_TIME_MS\", \"0\"))\n"
         "resume_step = int(os.environ.get(\"RESUME_STEP\", \"0\"))\n"
         "resume_checkpoint = os.environ.get(\"RESUME_CHECKPOINT\", \"\")\n"
         "if resume_checkpoint:\n"
         "    ckpt = torch.load(resume_checkpoint, map_location=\"cuda\")\n"
         "    resume_step = int(ckpt[\"step\"])\n"
+        "    resume_training_time_ms = float(ckpt.get(\"training_time_ms\", resume_training_time_ms))\n"
         "    raw_model.load_state_dict(ckpt[\"model\"])\n"
         "    for opt, state in zip(optimizers, ckpt[\"optimizers\"]):\n"
         "        opt.load_state_dict(state)\n"
@@ -73,15 +112,31 @@ def patch_resumable_full_1(text: str) -> str:
     text = replace_once(
         text,
         "log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])",
-        "log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers], schedulers=[sched.state_dict() for sched in schedulers])",
+        "log = dict(step=step, code=code, model=raw_model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers], schedulers=[sched.state_dict() for sched in schedulers], training_time_ms=training_time_ms)",
     )
+    training_time_replaced = False
+    for old, new in (
+        (
+            "training_time_ms = 0\n# start the clock",
+            "training_time_ms = resume_training_time_ms\n# start the clock",
+        ),
+        (
+            "training_time_ms = 0\ntorch.cuda.synchronize()",
+            "training_time_ms = resume_training_time_ms\ntorch.cuda.synchronize()",
+        ),
+    ):
+        if old in text:
+            text = replace_once(text, old, new)
+            training_time_replaced = True
+            break
+    if not training_time_replaced:
+        raise SystemExit("could not find initial training_time_ms assignment")
     text = replace_once(
         text,
         "train_loader.reset()\nfor step in range(args.num_iterations + 1):",
         "train_loader.reset()\n"
         "if resume_step > 0:\n"
-        "    for _ in range(resume_step * train_accumulation_steps):\n"
-        "        x, y = train_loader.next_batch()\n"
+        "    x, y = train_loader.seek_batch(resume_step * train_accumulation_steps - 1)\n"
         "for step in range(resume_step, args.num_iterations + 1):",
     )
     return text
