@@ -145,3 +145,25 @@ the materialized training source against the imported upstream file, audit
 preconditioner refresh/apply tensors across a checkpoint round trip on a tiny
 deterministic batch, and verify whether the expected right-preconditioned
 gradient path is active before spending another full GPU2 lease.
+
+## 2026-06-30 Resume Offset Re-Audit
+
+The corrected-resume run still used one materialization change that does not
+match an uninterrupted upstream training stream. The upstream script prefetches
+`x, y = train_loader.next_batch()` and then calls `train_loader.reset()` before
+the training loop. Because of that quirk, checkpoint step `N` is positioned with
+the next prefetched training batch at `N * train_accumulation_steps - 1`, not
+`N * train_accumulation_steps`.
+
+The prior change to seek exactly `N * train_accumulation_steps` was therefore
+not an upstream-preserving fix. Full materialization now restores the
+`-1` offset and keeps the preconditioner view rebuild. It also fast-forwards
+the LR scheduler if a legacy checkpoint lacks serialized scheduler state,
+because missing scheduler state would delay the warmdown and answer the wrong
+"trained enough" question.
+
+Next decision: rerun Newton-Muon-1 from the same clean step-2100 checkpoint
+with both fixes active. This run has high information value: if it recovers the
+paper loss, the miss was implementation/resume-induced; if it remains near
+`3.278`, the next target is the Newton preconditioner math/runtime itself, not
+training length or GPU model.

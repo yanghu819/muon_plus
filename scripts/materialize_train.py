@@ -129,6 +129,9 @@ def patch_resumable_full_1(text: str) -> str:
         "        _rebuild_preconditioner_views_after_load(opt)\n"
         "    for sched, state in zip(schedulers, ckpt.get(\"schedulers\", [])):\n"
         "        sched.load_state_dict(state)\n"
+        "    if resume_step > 0 and not ckpt.get(\"schedulers\"):\n"
+        "        for sched in schedulers:\n"
+        "            sched.step(resume_step)\n"
         "    print(f\"resuming from {resume_checkpoint} at step {resume_step}\")",
     )
     text = replace_once(
@@ -158,7 +161,7 @@ def patch_resumable_full_1(text: str) -> str:
         "train_loader.reset()\nfor step in range(args.num_iterations + 1):",
         "train_loader.reset()\n"
         "if resume_step > 0:\n"
-        "    x, y = train_loader.seek_batch(resume_step * train_accumulation_steps)\n"
+        "    x, y = train_loader.seek_batch(resume_step * train_accumulation_steps - 1)\n"
         "for step in range(resume_step, args.num_iterations + 1):",
     )
     return text
