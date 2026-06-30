@@ -81,6 +81,20 @@ def write_report(repo: Path, record: dict) -> None:
     exp_dir.mkdir(exist_ok=True)
     paper_loss = record.get("paper_loss")
     loss_delta = record.get("loss_delta")
+    mode = record.get("mode")
+    status = record.get("status")
+    final_loss = record.get("final_val_loss")
+    if mode == "smoke":
+        decision = "Use this run only as an infrastructure check; tiny-data losses are not comparable to the paper."
+    elif status != "completed":
+        decision = "Do not compare this run to the paper until the full training path completes successfully."
+    elif final_loss is not None and paper_loss is not None and loss_delta is not None:
+        if abs(float(loss_delta)) <= 0.003:
+            decision = "Treat this full run as reproduced on validation loss. Wall time remains hardware-sensitive and secondary."
+        else:
+            decision = "This full run completed but did not reproduce the paper validation loss; investigate optimizer, resume, or environment differences before using it as a trusted baseline."
+    else:
+        decision = "Use full runs for paper comparison; timing is hardware-sensitive, so validation loss is the primary comparison target."
     lines = [
         f"# {record['run_id']}",
         "",
@@ -108,7 +122,7 @@ def write_report(repo: Path, record: dict) -> None:
         "",
         "## Decision",
         "",
-        "Use smoke runs only as infrastructure checks. Use full runs for paper comparison; timing is hardware-sensitive, so validation loss is the primary comparison target.",
+        decision,
         "",
         "## Artifacts",
         "",

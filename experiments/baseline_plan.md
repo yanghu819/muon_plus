@@ -89,3 +89,33 @@ Newton-Muon result creates a specific diagnostic need.
 Kill criteria: stop before full if smoke fails, CUDA/kernel registration fails,
 FineWeb verification fails, or resume cannot preserve optimizer/preconditioner
 state.
+
+## 2026-06-30 Newton-Muon-1 Result
+
+The Newton-Muon-1 full run completed on GPU2 at git SHA
+`9c87b12eee49dc98c7b7f3141299f43093b4b5c0` with final validation loss
+`3.2806`. This is only `0.0007` better than the reproduced Muon-1 loss
+`3.2813` and remains `+0.0195` above the paper Newton-Muon-1 value `3.2611`.
+Conclusion: the run is complete, but the paper optimizer improvement was not
+reproduced.
+
+The highest-value diagnostic is checkpoint resume correctness, not another
+optimizer grid. The Newton-Muon optimizer keeps batched preconditioner apply
+buffers outside the serialized optimizer state graph. After
+`optimizer.load_state_dict()`, the loaded `precond_inv_apply` tensors no longer
+point at the batched `_apply_plan` buffers created before loading. That means a
+resumed run can keep updating checkpoint tensors while applying stale identity
+preconditioners in the batched gradient path. Full-mode materialization now
+rewires those views immediately after loading optimizer state.
+
+The same resume audit found a one-batch DataLoader seek offset. A checkpoint
+at `step=N` is saved before training step `N`, with the next batch already
+positioned at `N * train_accumulation_steps`. The old seek used
+`N * train_accumulation_steps - 1`, repeating the previous batch on resume.
+Full-mode materialization now seeks to the exact next batch index.
+
+Next decision: rerun Newton-Muon-1 from the last checkpoint produced before the
+first resume boundary, using the fixed materialization. A blind from-scratch
+rerun is lower ROI while the pre-resume checkpoint can preserve the valid early
+trajectory and directly test whether the resume fix recovers the reported
+Newton-Muon gap.

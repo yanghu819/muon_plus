@@ -95,6 +95,27 @@ def patch_resumable_full_1(text: str) -> str:
         text,
         "schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]",
         "schedulers = [torch.optim.lr_scheduler.LambdaLR(opt, get_lr) for opt in optimizers]\n\n"
+        "def _rebuild_preconditioner_views_after_load(opt):\n"
+        "    if not hasattr(opt, \"_finalize_precond_buffers_\"):\n"
+        "        return\n"
+        "    if not getattr(opt, \"_precond_attached\", False):\n"
+        "        return\n"
+        "    saved_inv = {}\n"
+        "    for group in opt.param_groups:\n"
+        "        for p in group[\"params\"]:\n"
+        "            st = opt.state.get(p, {})\n"
+        "            inv = st.get(\"precond_inv_apply\")\n"
+        "            if torch.is_tensor(inv):\n"
+        "                saved_inv[p] = inv.detach().clone()\n"
+        "    opt._precond_ready = False\n"
+        "    opt._refresh_map = []\n"
+        "    opt._refresh_K = None\n"
+        "    opt._apply_plan = None\n"
+        "    opt._finalize_precond_buffers_()\n"
+        "    for p, inv in saved_inv.items():\n"
+        "        st = opt.state.get(p, {})\n"
+        "        if \"precond_inv_apply\" in st:\n"
+        "            st[\"precond_inv_apply\"].copy_(inv)\n\n"
         "resume_training_time_ms = float(os.environ.get(\"RESUME_TRAIN_TIME_MS\", \"0\"))\n"
         "resume_step = int(os.environ.get(\"RESUME_STEP\", \"0\"))\n"
         "resume_checkpoint = os.environ.get(\"RESUME_CHECKPOINT\", \"\")\n"
@@ -105,6 +126,7 @@ def patch_resumable_full_1(text: str) -> str:
         "    raw_model.load_state_dict(ckpt[\"model\"])\n"
         "    for opt, state in zip(optimizers, ckpt[\"optimizers\"]):\n"
         "        opt.load_state_dict(state)\n"
+        "        _rebuild_preconditioner_views_after_load(opt)\n"
         "    for sched, state in zip(schedulers, ckpt.get(\"schedulers\", [])):\n"
         "        sched.load_state_dict(state)\n"
         "    print(f\"resuming from {resume_checkpoint} at step {resume_step}\")",
@@ -136,7 +158,7 @@ def patch_resumable_full_1(text: str) -> str:
         "train_loader.reset()\nfor step in range(args.num_iterations + 1):",
         "train_loader.reset()\n"
         "if resume_step > 0:\n"
-        "    x, y = train_loader.seek_batch(resume_step * train_accumulation_steps - 1)\n"
+        "    x, y = train_loader.seek_batch(resume_step * train_accumulation_steps)\n"
         "for step in range(resume_step, args.num_iterations + 1):",
     )
     return text
