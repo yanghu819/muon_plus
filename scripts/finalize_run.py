@@ -91,6 +91,8 @@ def write_report(repo: Path, record: dict) -> None:
     elif final_loss is not None and paper_loss is not None and loss_delta is not None:
         if abs(float(loss_delta)) <= 0.003:
             decision = "Treat this full run as reproduced on validation loss. Wall time remains hardware-sensitive and secondary."
+        elif record.get("method") == "newton_muon1" and mode == "full":
+            decision = "This full Newton-Muon run completed, but it did not reproduce the paper optimizer delta; compare against the reproduced Muon baseline and run targeted Newton-specific diagnostics before another full rerun."
         else:
             decision = "This full run completed but did not reproduce the paper validation loss; investigate optimizer, resume, or environment differences before using it as a trusted baseline."
     else:

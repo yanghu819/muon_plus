@@ -119,3 +119,29 @@ first resume boundary, using the fixed materialization. A blind from-scratch
 rerun is lower ROI while the pre-resume checkpoint can preserve the valid early
 trajectory and directly test whether the resume fix recovers the reported
 Newton-Muon gap.
+
+## 2026-06-30 Corrected Resume Result
+
+The corrected Newton-Muon-1 resume completed on GPU2 at git SHA
+`46d9db9a9ec51979c6c771655fde44ef63834943` with final validation loss
+`3.2785`. That is better than the broken resumed Newton-Muon run (`3.2806`) and
+slightly better than the reproduced Muon-1 baseline (`3.2813`), but it remains
+`+0.0174` above the paper Newton-Muon-1 loss `3.2611`.
+
+Conclusion: Muon-1 is reproduced; Newton-Muon-1 is not reproduced yet. The
+resume repair recovered only `0.0021` loss versus the broken Newton-Muon run,
+while the paper-level Newton-Muon delta should be about `0.0182` versus Muon.
+This rules out using the corrected run as a trusted baseline for new optimizer
+ideas.
+
+Operational lesson: `run.sh` launches from each run's `source_snapshot`, so
+`RESUME_CHECKPOINT` must be an absolute `/huyang2/muon_plus/...` path. The
+failed `2026-06-30T03-49-39Z-newton_muon1-full-resume-fix2-46d9db9` run is
+kept in the ledger as a provenance and lease-time lesson.
+
+Next decision: do not run a broad comparison table or blind from-scratch
+rerun. The next experiment must isolate a Newton-specific mechanism: compare
+the materialized training source against the imported upstream file, audit
+preconditioner refresh/apply tensors across a checkpoint round trip on a tiny
+deterministic batch, and verify whether the expected right-preconditioned
+gradient path is active before spending another full GPU2 lease.
