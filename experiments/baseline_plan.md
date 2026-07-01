@@ -196,3 +196,24 @@ frequency/state matches the paper code path at refresh boundaries; and compare
 the materialized optimizer source against upstream for any semantic drift in
 orthogonalization, preconditioner inverse application, or distributed parameter
 grouping.
+
+## 2026-07-01 Newton Runtime Diagnostic
+
+The CUDA diagnostic at git SHA
+`931a5796360687a6aedad372fec84072f8f99926` constructed minimal qkv,
+attention-output, MLP-up, and MLP-projection parameter shapes on GPU2 and
+checked the Newton right-preconditioner apply path numerically.
+
+Result:
+
+- direct batched preconditioner apply max error: `0`
+- checkpoint load without rebuilding `_apply_plan` max error: `41.14`
+- checkpoint load with rebuild max error: `0`
+
+Decision: the earlier stale `_apply_plan` diagnosis was real, and the rebuild
+fix exactly restores CUDA behavior after checkpoint load. The remaining paper
+gap is therefore not explained by the active batched apply path being disabled
+after the latest fix. The next diagnostic should move one layer earlier:
+activation covariance accumulation and refresh scheduling, especially whether
+the accumulated covariance and Cholesky inverse values match the intended
+Newton-Muon regime before and after refresh boundaries.
