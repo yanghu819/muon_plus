@@ -313,3 +313,29 @@ screening switches:
 GPU2 queue `2026-07-01T09-43-30Z-fast-variants-300-05138f72` is the current
 300-step pruning gate. Its purpose is to cover the remaining high-level ideas
 quickly, then promote only the few settings with evidence.
+
+The 300-step screen completed with one interruption: GPU2 lease expired during
+the first sketch64 attempt, so GPU2 was reopened and only sketch64 was rerun.
+During the run, `NEWMUON_LAYER_ADAPTIVE` was found to be wired only to the
+refresh/telemetry apply path; commit
+`b03a67917ce6b78b888f00095fb27f4e020b6844` fixed it so adaptive blending
+forces the per-step instrumentation path like Trust. The interrupted adaptive
+attempt before this fix is invalid and not counted.
+
+300-step results:
+
+- Lite diagonal: `4.3811`
+- Lite + Layer-Adaptive: `4.3658`
+- Lite + Trust: `4.3677`
+- Lite qkv/c_fc only: `4.4118`
+- Low-rank16: `4.4062`
+- Sketch64: `4.4392`
+
+Decision: promote Lite + Layer-Adaptive. The mechanism is strong enough to
+continue because it improves over Lite diagonal and Trust while telemetry shows
+the expected behavior: `qkv/c_fc` alpha stays near `1.0`, while high-norm
+`o/c_proj` directions are downweighted instead of removed. Hard module masking
+is rejected because `qkv/c_fc` only regresses to `4.4118`, meaning `o/c_proj`
+still carry useful signal. Low-rank and random sketch are rejected for now:
+their 300-step losses are worse than Lite and do not justify a scalability
+story until the gated diagonal family is pushed further.
