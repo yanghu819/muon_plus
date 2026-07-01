@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
@@ -9,6 +10,7 @@ import torch
 
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = REPO / "train_gpt_newton_muon_1.py"
+sys.path.insert(0, str(REPO))
 
 
 def load_training_defs() -> dict:
