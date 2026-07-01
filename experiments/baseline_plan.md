@@ -244,3 +244,32 @@ algorithm variant is chosen from evidence:
 - refresh-step spikes or instability -> Lagged Newton-Muon
 
 This keeps the iteration insight-driven and avoids table-filling ablations.
+
+## 2026-07-01 Telemetry Gate and Trust-Region Decision
+
+The compiled activation accumulation diagnostic at
+`7438521412eb495a6d9b3b1a0149843c84435b94` passed on GPU2 with all checked
+module-family max absolute errors below `0.002` against a torch reference. This
+rules out a gross activation-hook fallback as the current reproduction gap.
+
+The 128-step telemetry-only run
+`2026-07-01T07-06-31Z-newton-telemetry-gate-7438521` produced the first
+mechanism signal:
+
+- `qkv`: cosine p50 `0.2538`, norm-ratio p50 `1.4119`
+- `c_fc`: cosine p50 `0.2683`, norm-ratio p50 `2.8132`
+- `o`: cosine p50 `0.1417`, norm-ratio p50 `8.1920`
+- `c_proj`: cosine p50 `0.2569`, norm-ratio p50 `14.6376`
+
+Decision: run Trust-Region Newton-Muon first. The problem is not uniformly
+"P too big"; it is module-dependent trust quality. A global scale-only fix may
+erase useful `qkv/c_fc` signal while failing to address low-cosine `o/c_proj`
+directions.
+
+The 600-step Trust run
+`2026-07-01T07-16-11Z-trust-newton-muon1-600-7438521` completed with val
+`3.9154`, no NaNs, and stable memory. Validation went `4.7556 -> 4.1239 ->
+3.9154` at steps `200/400/600`. This passes the short safety gate, but it does
+not prove a paper-level result. A 2100-step Trust gate was launched next at
+`2026-07-01T07:45:43Z` to decide whether the mechanism deserves a full
+6200-step run.
