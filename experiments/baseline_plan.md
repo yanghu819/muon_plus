@@ -167,3 +167,32 @@ with both fixes active. This run has high information value: if it recovers the
 paper loss, the miss was implementation/resume-induced; if it remains near
 `3.278`, the next target is the Newton preconditioner math/runtime itself, not
 training length or GPU model.
+
+## 2026-07-01 Offset-Preserving Resume Result
+
+The offset-preserving Newton-Muon-1 rerun completed on GPU2 at git SHA
+`7d5202ca79359c2bb3796aad99149fb064dc6fe9` with final validation loss
+`3.2785`. It used the restored upstream-style resume seek
+`resume_step * train_accumulation_steps - 1`, preserved serialized scheduler
+state, and kept the post-load Newton preconditioner view rebuild.
+
+This answers the latest diagnostic question: the miss is not explained by
+insufficient training length. The run reached the same `6200/6200` endpoint as
+the upstream `_1` script. It is also not explained by the resume offset audit:
+the corrected offset landed at the same final loss as the previous repaired run
+and stayed `+0.0174` above the paper Newton-Muon-1 value `3.2611`.
+
+The stronger control remains the Muon-1 reproduction at `3.2813`, only
+`+0.0020` above the paper Muon value `3.2793`. That makes a GPU-only
+explanation unlikely for the Newton-Muon gap: the data, token stream, baseline
+harness, and validation path are good enough to reproduce Muon, while the
+Newton-specific improvement is almost absent.
+
+Next decision: stop full reruns until a targeted Newton-specific diagnostic
+finds a mechanism. Highest-value checks are: prove the active batched
+right-preconditioned gradient numerically against a small deterministic
+reference before and after checkpoint restore; audit whether the Newton update
+frequency/state matches the paper code path at refresh boundaries; and compare
+the materialized optimizer source against upstream for any semantic drift in
+orthogonalization, preconditioner inverse application, or distributed parameter
+grouping.
