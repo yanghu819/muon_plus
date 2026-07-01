@@ -205,7 +205,7 @@ class Muon(torch.optim.Optimizer):
                     yield p, stref
 
     def _instrument_apply_(self) -> bool:
-        if self.trust_enabled:
+        if self.trust_enabled or self.layer_adaptive:
             return True
         if not self.telemetry_path:
             return False
@@ -485,7 +485,7 @@ class Muon(torch.optim.Optimizer):
                 return None
             return torch.empty((n, out_mult * d, d), device=dev, dtype=torch.float32)
 
-        needs_tmp = self.trust_enabled or bool(self.telemetry_path)
+        needs_tmp = self.trust_enabled or self.layer_adaptive or bool(self.telemetry_path)
 
         plan = {
             "d": d,
