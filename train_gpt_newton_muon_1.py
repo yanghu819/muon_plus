@@ -156,6 +156,16 @@ class Muon(torch.optim.Optimizer):
         self.scale_invariant = _env_flag("NEWMUON_SCALE_INVARIANT", False)
         self.lagged_preconditioner = _env_flag("NEWMUON_LAGGED", False)
         self.lite_diag = _env_flag("NEWMUON_LITE_DIAG", False)
+        self.low_rank = _env_flag("NEWMUON_LOW_RANK", False)
+        self.low_rank_rank = _env_int("NEWMUON_LOW_RANK_K", 64)
+        self.sketch_rank = _env_int("NEWMUON_SKETCH_RANK", 0)
+        kind_mask = os.environ.get("NEWMUON_KIND_MASK", "").strip()
+        self.kind_mask = None if not kind_mask else {x.strip() for x in kind_mask.split(",") if x.strip()}
+        self.layer_adaptive = _env_flag("NEWMUON_LAYER_ADAPTIVE", False)
+        self.adaptive_cos_min = _env_float("NEWMUON_ADAPTIVE_COS_MIN", 0.25)
+        self.adaptive_cos_full = _env_float("NEWMUON_ADAPTIVE_COS_FULL", 0.8)
+        self.adaptive_norm_min = _env_float("NEWMUON_ADAPTIVE_NORM_MIN", 0.25)
+        self.adaptive_norm_max = _env_float("NEWMUON_ADAPTIVE_NORM_MAX", 16.0)
         self.trust_alpha_max = _env_float("NEWMUON_TRUST_ALPHA_MAX", 1.0)
         self.trust_cos_min = _env_float("NEWMUON_TRUST_COS_MIN", 0.0)
         self.trust_cos_full = _env_float("NEWMUON_TRUST_COS_FULL", 0.5)
@@ -222,6 +232,21 @@ class Muon(torch.optim.Optimizer):
             norm_gate = 1.0
         return float(self.trust_alpha_max * step_gate * cos_gate * norm_gate)
 
+    def _adaptive_alpha_(self, cosine: float, norm_ratio: float) -> float:
+        if not self.layer_adaptive:
+            return 1.0
+        denom = max(1e-12, self.adaptive_cos_full - self.adaptive_cos_min)
+        cos_gate = min(1.0, max(0.0, (cosine - self.adaptive_cos_min) / denom))
+        if norm_ratio <= 0.0:
+            norm_gate = 0.0
+        elif norm_ratio < self.adaptive_norm_min:
+            norm_gate = norm_ratio / max(1e-12, self.adaptive_norm_min)
+        elif norm_ratio > self.adaptive_norm_max:
+            norm_gate = self.adaptive_norm_max / norm_ratio
+        else:
+            norm_gate = 1.0
+        return float(cos_gate * norm_gate)
+
     def _matrix_stats_(self, p: Tensor) -> dict:
         st = self.state[p]
         cov = st.get("precond_cov")
@@ -255,6 +280,7 @@ class Muon(torch.optim.Optimizer):
         cosine = float((raw_f.flatten() @ pre_f.flatten() / denom).item())
         norm_ratio = float((pre_norm / (raw_norm + 1e-30)).item())
         alpha = self._trust_alpha_(cosine, norm_ratio)
+        alpha = min(alpha, self._adaptive_alpha_(cosine, norm_ratio))
 
         should_log = bool(
             self.telemetry_path
@@ -272,6 +298,11 @@ class Muon(torch.optim.Optimizer):
                 "trust_enabled": bool(self.trust_enabled),
                 "scale_invariant": bool(self.scale_invariant),
                 "lite_diag": bool(self.lite_diag),
+                "low_rank": bool(self.low_rank),
+                "low_rank_rank": int(self.low_rank_rank),
+                "sketch_rank": int(self.sketch_rank),
+                "kind_mask": "" if self.kind_mask is None else ",".join(sorted(self.kind_mask)),
+                "layer_adaptive": bool(self.layer_adaptive),
                 "alpha": alpha,
                 "grad_norm": float(raw_norm.item()),
                 "precond_grad_norm": float(pre_norm.item()),
@@ -442,6 +473,11 @@ class Muon(torch.optim.Optimizer):
         )
 
         dev = refresh_map[0][0].device if refresh_map else torch.device("cuda")
+        self._sketch_Q = None
+        if self.sketch_rank > 0 and d > 0:
+            k = min(max(1, int(self.sketch_rank)), d)
+            q = torch.randn((d, k), device=dev, dtype=torch.float32)
+            self._sketch_Q = torch.linalg.qr(q, mode="reduced").Q.contiguous()
 
         def alloc_grad_buf(params, out_mult):
             n = len(params)
@@ -545,6 +581,35 @@ class Muon(torch.optim.Optimizer):
             inv_diag = diag.reciprocal()
             K.zero_()
             K.diagonal(dim1=-2, dim2=-1).copy_(inv_diag)
+        elif self.low_rank:
+            rank = min(max(1, int(self.low_rank_rank)), d)
+            base = diag.mean(dim=-1).clamp_min(self.precond_eps).reciprocal()
+            evals, evecs = torch.linalg.eigh(K)
+            vals = evals[:, -rank:].clamp_min(self.precond_eps)
+            vecs = evecs[:, :, -rank:]
+            correction = vals.reciprocal() - base.unsqueeze(-1)
+            K.zero_()
+            K.diagonal(dim1=-2, dim2=-1).copy_(base[:, None].expand(-1, d))
+            K.add_(torch.bmm(vecs * correction[:, None, :], vecs.transpose(1, 2)))
+        elif self.sketch_rank > 0:
+            Q = self._sketch_Q
+            if Q is None:
+                raise RuntimeError("NEWMUON_SKETCH_RANK requested but sketch basis is not initialized")
+            k = Q.size(1)
+            base = diag.mean(dim=-1).clamp_min(self.precond_eps).reciprocal()
+            KQ = torch.matmul(K, Q)
+            small = torch.matmul(Q.T, KQ).contiguous()
+            eye = torch.eye(k, device=K.device, dtype=K.dtype).expand(K.size(0), k, k)
+            L, info = torch.linalg.cholesky_ex(small, upper=False, check_errors=False)
+            small_inv = torch.cholesky_inverse(L, upper=False)
+            if info.numel() == K.size(0):
+                bad = info != 0
+                if bad.any():
+                    small_inv[bad].copy_(eye[bad])
+            small_inv.diagonal(dim1=-2, dim2=-1).sub_(base[:, None])
+            K.zero_()
+            K.diagonal(dim1=-2, dim2=-1).copy_(base[:, None].expand(-1, d))
+            K.add_(torch.bmm(torch.matmul(Q.unsqueeze(0), small_inv), Q.T.expand(K.size(0), k, d)))
         else:
             L, info = torch.linalg.cholesky_ex(K, upper=False, check_errors=False)
             torch.cholesky_inverse(L, upper=False, out=K)
@@ -562,6 +627,9 @@ class Muon(torch.optim.Optimizer):
         for i, (p, kind, sub) in enumerate(self._refresh_map):
             st = self.state[p]
             inv_i = K[i]
+            if self.kind_mask is not None and kind not in self.kind_mask:
+                inv_i.zero_()
+                inv_i.diagonal(dim1=-2, dim2=-1).fill_(1.0)
             if kind in ("qkv", "o", "c_fc"):
                 st["precond_inv_apply"].copy_(inv_i)
             else:
