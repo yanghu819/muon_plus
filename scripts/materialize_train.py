@@ -28,6 +28,22 @@ def patch_common_paths(text: str, train_pattern: str, val_pattern: str) -> str:
     return text
 
 
+def patch_seed_control(text: str) -> str:
+    if "torch.manual_seed(_seed)" in text:
+        return text
+    return replace_once(
+        text,
+        "import torch\n",
+        "import torch\n\n"
+        "_seed = int(os.environ.get(\"SEED\", \"1337\"))\n"
+        "np.random.seed(_seed)\n"
+        "torch.manual_seed(_seed)\n"
+        "if torch.cuda.is_available():\n"
+        "    torch.cuda.manual_seed_all(_seed)\n"
+        "print(f\"seed={_seed}\")\n",
+    )
+
+
 def patch_smoke_1(text: str) -> str:
     replacements = [
         ("batch_size : int = 8*64", "batch_size : int = 4"),
@@ -205,6 +221,7 @@ def main() -> None:
         str(data_root / "fineweb_train_*.bin"),
         str(data_root / "fineweb_val_*.bin"),
     )
+    text = patch_seed_control(text)
     if args.mode == "smoke":
         text = patch_smoke_1(text)
     elif args.method.endswith("1"):

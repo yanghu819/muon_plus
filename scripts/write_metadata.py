@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import platform
 import subprocess
 from pathlib import Path
@@ -41,6 +42,7 @@ def main() -> None:
         "source": args.source,
         "git_sha": args.git_sha,
         "started_at": args.started_at,
+        "seed": os.environ.get("SEED", "1337"),
         "upstream": UPSTREAM,
         "python": platform.python_version(),
         "platform": platform.platform(),
@@ -53,4 +55,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
