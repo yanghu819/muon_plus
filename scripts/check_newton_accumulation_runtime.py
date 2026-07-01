@@ -16,7 +16,7 @@ sys.path.insert(0, str(REPO))
 def load_training_defs() -> dict:
     src = SOURCE.read_text()
     end = src.index("# -----------------------------------------------------------------------------\n# Our own simple Distributed Data Loader")
-    ns: dict = {"__name__": "newton_accumulation_runtime"}
+    ns: dict = {"__name__": "newton_accumulation_runtime", "Tensor": torch.Tensor}
     exec(src[:end], ns)
     return ns
 
