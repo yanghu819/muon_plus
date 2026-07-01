@@ -275,3 +275,41 @@ The 600-step Trust run
 not prove a paper-level result. A 2100-step Trust gate was launched next at
 `2026-07-01T07:45:43Z` to decide whether the mechanism deserves a full
 6200-step run.
+
+## 2026-07-01 Fast Idea Pruning
+
+The strategy changed after the Trust 2100 launch: do not let one algorithm run
+long before the idea space is covered. The Trust run was stopped after partial
+validation points at steps `300/600/900`: `4.3746`, `3.9125`, `3.7713`. Treat
+that as a safety signal only, not as a final promotion.
+
+The first fixed-seed 128-step screen at
+`04a83d36273625960d702d490f6f929b602ad6d9` produced:
+
+- Muon anchor: `5.2253`
+- Newton-Muon full covariance: `5.4443`
+- Trust-Region Newton-Muon: `5.2058`
+- Scale-Invariant Newton-Muon: `5.2676`
+- Lagged Newton-Muon: `5.4418`
+- Newton-Muon Lite diagonal: `5.1874`
+- Lite diagonal + scale normalization: `5.2051`
+
+Decision: prune full covariance, lagged, and scale-only. Lite diagonal is the
+positive control; Trust is still a plausible safety mechanism. The surprising
+telemetry is that Lite diagonal has very high cosine but huge norm ratios:
+`o` p50 norm ratio around `65` and `c_proj` around `41`. This points to two
+non-table-filling follow-ups: adaptive/trust gates for the norm explosion, and
+module-structured masks to ask whether `o/c_proj` should be preconditioned at
+all.
+
+Commit `05138f72bb4e52d5ffa13bfe60c24d6be40b3148` adds the remaining fast
+screening switches:
+
+- `NEWMUON_LOW_RANK=1 NEWMUON_LOW_RANK_K=16`
+- `NEWMUON_SKETCH_RANK=64`
+- `NEWMUON_LAYER_ADAPTIVE=1`
+- `NEWMUON_KIND_MASK=qkv,c_fc`
+
+GPU2 queue `2026-07-01T09-43-30Z-fast-variants-300-05138f72` is the current
+300-step pruning gate. Its purpose is to cover the remaining high-level ideas
+quickly, then promote only the few settings with evidence.
