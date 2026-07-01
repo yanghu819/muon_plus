@@ -217,3 +217,30 @@ after the latest fix. The next diagnostic should move one layer earlier:
 activation covariance accumulation and refresh scheduling, especially whether
 the accumulated covariance and Cholesky inverse values match the intended
 Newton-Muon regime before and after refresh boundaries.
+
+## 2026-07-01 Algorithm-Improvement Harness
+
+The next research direction is no longer a blind reproduction rerun. The code
+now supports a mechanism-first Newton-Muon++ harness with defaults unchanged:
+
+- `NEWMUON_TELEMETRY_PATH=/abs/path.jsonl` records per-refresh `C/P/gP`
+  statistics: covariance scale, inverse scale, grad/preconditioned-grad norm
+  ratio, cosine, trust alpha, and module label.
+- `NEWMUON_TRUST=1` enables Trust-Region Newton-Muon:
+  `g_new = (1 - alpha) * g + alpha * (g @ P)`, with alpha gated by cosine,
+  norm ratio, and optional warmup.
+- `NEWMUON_SCALE_INVARIANT=1` normalizes each inverse preconditioner to
+  separate coordinate correction from hidden global learning-rate changes.
+- `NEWMUON_LAGGED=1` applies the previous preconditioner to the current
+  gradient, then refreshes `P` for future steps.
+
+The first required experiment is telemetry-only, not an algorithm change:
+run `newton_muon1` for 128-300 steps on GPU2 with full model/data and a reduced
+validation budget, then summarize telemetry by qkv/o/c_fc/c_proj. The next
+algorithm variant is chosen from evidence:
+
+- low cosine or extreme norm ratios -> Trust-Region Newton-Muon
+- inverse scale dominating global update size -> Scale-Invariant Newton-Muon
+- refresh-step spikes or instability -> Lagged Newton-Muon
+
+This keeps the iteration insight-driven and avoids table-filling ablations.

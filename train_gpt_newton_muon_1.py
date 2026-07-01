@@ -5,6 +5,7 @@ with open(sys.argv[0]) as f:
 import uuid
 import glob
 import time
+import json
 from dataclasses import dataclass
 
 import numpy as np
@@ -12,6 +13,23 @@ import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
 from triton_kernels import XXT, ba_plus_cAA
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    return default if value is None else float(value)
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    return default if value is None else int(value)
 
 # -----------------------------------------------------------------------------
 # Custom operators: activation XtX accumulation (for preconditioner)
@@ -131,6 +149,20 @@ class Muon(torch.optim.Optimizer):
 
         self._apply_plan = None
 
+        self.telemetry_path = os.environ.get("NEWMUON_TELEMETRY_PATH", "")
+        self.telemetry_every_apply = _env_flag("NEWMUON_TELEMETRY_EVERY_APPLY", False)
+        self.telemetry_max_step = _env_int("NEWMUON_TELEMETRY_MAX_STEP", 10**9)
+        self.trust_enabled = _env_flag("NEWMUON_TRUST", False)
+        self.scale_invariant = _env_flag("NEWMUON_SCALE_INVARIANT", False)
+        self.lagged_preconditioner = _env_flag("NEWMUON_LAGGED", False)
+        self.trust_alpha_max = _env_float("NEWMUON_TRUST_ALPHA_MAX", 1.0)
+        self.trust_cos_min = _env_float("NEWMUON_TRUST_COS_MIN", 0.0)
+        self.trust_cos_full = _env_float("NEWMUON_TRUST_COS_FULL", 0.5)
+        self.trust_norm_min = _env_float("NEWMUON_TRUST_NORM_MIN", 0.25)
+        self.trust_norm_max = _env_float("NEWMUON_TRUST_NORM_MAX", 4.0)
+        self.trust_warmup_steps = _env_int("NEWMUON_TRUST_WARMUP_STEPS", 0)
+        self._telemetry_do_refresh = False
+
     def _regime_schedule_(self, step: int) -> tuple[bool, float, float]:
         since = max(0, int(step) - int(self._regime_step))
         t = since + 1
@@ -160,6 +192,96 @@ class Muon(torch.optim.Optimizer):
                 stref = getattr(p, "_stats_ref", None)
                 if stref is not None:
                     yield p, stref
+
+    def _instrument_apply_(self) -> bool:
+        if self.trust_enabled:
+            return True
+        if not self.telemetry_path:
+            return False
+        if self.global_step > self.telemetry_max_step:
+            return False
+        return self.telemetry_every_apply or self._telemetry_do_refresh
+
+    def _trust_alpha_(self, cosine: float, norm_ratio: float) -> float:
+        if not self.trust_enabled:
+            return 1.0
+        if self.trust_warmup_steps > 0:
+            step_gate = min(1.0, max(0.0, float(self.global_step + 1) / float(self.trust_warmup_steps)))
+        else:
+            step_gate = 1.0
+        denom = max(1e-12, self.trust_cos_full - self.trust_cos_min)
+        cos_gate = min(1.0, max(0.0, (cosine - self.trust_cos_min) / denom))
+        if norm_ratio <= 0.0:
+            norm_gate = 0.0
+        elif norm_ratio < self.trust_norm_min:
+            norm_gate = norm_ratio / max(1e-12, self.trust_norm_min)
+        elif norm_ratio > self.trust_norm_max:
+            norm_gate = self.trust_norm_max / norm_ratio
+        else:
+            norm_gate = 1.0
+        return float(self.trust_alpha_max * step_gate * cos_gate * norm_gate)
+
+    def _matrix_stats_(self, p: Tensor) -> dict:
+        st = self.state[p]
+        cov = st.get("precond_cov")
+        inv = st.get("precond_inv_apply")
+        out = {}
+        if torch.is_tensor(cov):
+            cov_diag = cov.diagonal(dim1=-2, dim2=-1).detach().float()
+            cov_diag_min = cov_diag.min().clamp_min(1e-30)
+            out.update(
+                cov_trace_mean=float(cov_diag.mean().item()),
+                cov_diag_min=float(cov_diag.min().item()),
+                cov_diag_max=float(cov_diag.max().item()),
+                cov_diag_cond_proxy=float((cov_diag.max() / cov_diag_min).item()),
+                ridge=float((cov_diag.mean() * self.precond_ridge_mult + self.precond_eps).item()),
+            )
+        if torch.is_tensor(inv):
+            inv_diag = inv.diagonal(dim1=-2, dim2=-1).detach().float()
+            out.update(
+                inv_diag_mean=float(inv_diag.mean().item()),
+                inv_diag_min=float(inv_diag.min().item()),
+                inv_diag_max=float(inv_diag.max().item()),
+            )
+        return out
+
+    def _record_and_blend_(self, p: Tensor, raw: Tensor, precond: Tensor, kind: str) -> None:
+        raw_f = raw.detach().float()
+        pre_f = precond.detach().float()
+        raw_norm = raw_f.norm()
+        pre_norm = pre_f.norm()
+        denom = raw_norm * pre_norm + 1e-30
+        cosine = float((raw_f.flatten() @ pre_f.flatten() / denom).item())
+        norm_ratio = float((pre_norm / (raw_norm + 1e-30)).item())
+        alpha = self._trust_alpha_(cosine, norm_ratio)
+
+        should_log = bool(
+            self.telemetry_path
+            and self.global_step <= self.telemetry_max_step
+            and (self.telemetry_every_apply or self._telemetry_do_refresh)
+        )
+        if should_log:
+            st = self.state[p]
+            row = {
+                "step": int(self.global_step),
+                "kind": kind,
+                "label": st.get("precond_label", kind),
+                "refresh_step": bool(self._telemetry_do_refresh),
+                "lagged": bool(self.lagged_preconditioner),
+                "trust_enabled": bool(self.trust_enabled),
+                "scale_invariant": bool(self.scale_invariant),
+                "alpha": alpha,
+                "grad_norm": float(raw_norm.item()),
+                "precond_grad_norm": float(pre_norm.item()),
+                "norm_ratio": norm_ratio,
+                "cosine": cosine,
+            }
+            row.update(self._matrix_stats_(p))
+            with open(self.telemetry_path, "a") as f:
+                f.write(json.dumps(row, sort_keys=True) + "\n")
+
+        if alpha < 1.0:
+            precond.mul_(alpha).add_(raw, alpha=1.0 - alpha)
 
     def _init_precond_state_for_param_(self, p: Tensor, stref: dict) -> None:
         st = self.state[p]
@@ -198,6 +320,7 @@ class Muon(torch.optim.Optimizer):
         if plan is None:
             return
         d = plan["d"]
+        instrument = self._instrument_apply_()
 
         if plan["g_qkv"] is not None:
             G = plan["g_qkv"]
@@ -206,10 +329,14 @@ class Muon(torch.optim.Optimizer):
                     G[i].zero_()
                 else:
                     G[i].copy_(p.grad, non_blocking=True)
-            torch.bmm(G, plan["inv_qkv"], out=G)
+            out = plan["tmp_qkv"] if instrument else G
+            torch.bmm(G, plan["inv_qkv"], out=out)
+            if instrument:
+                for i, p in enumerate(plan["qkv_params"]):
+                    self._record_and_blend_(p, G[i], out[i], "qkv")
             for i, p in enumerate(plan["qkv_params"]):
                 if p.grad is not None:
-                    p.grad.copy_(G[i], non_blocking=True)
+                    p.grad.copy_(out[i], non_blocking=True)
 
         if plan["g_o"] is not None:
             G = plan["g_o"]
@@ -218,10 +345,14 @@ class Muon(torch.optim.Optimizer):
                     G[i].zero_()
                 else:
                     G[i].copy_(p.grad, non_blocking=True)
-            torch.bmm(G, plan["inv_o"], out=G)
+            out = plan["tmp_o"] if instrument else G
+            torch.bmm(G, plan["inv_o"], out=out)
+            if instrument:
+                for i, p in enumerate(plan["o_params"]):
+                    self._record_and_blend_(p, G[i], out[i], "o")
             for i, p in enumerate(plan["o_params"]):
                 if p.grad is not None:
-                    p.grad.copy_(G[i], non_blocking=True)
+                    p.grad.copy_(out[i], non_blocking=True)
 
         if plan["g_fc"] is not None:
             G = plan["g_fc"]
@@ -230,10 +361,14 @@ class Muon(torch.optim.Optimizer):
                     G[i].zero_()
                 else:
                     G[i].copy_(p.grad, non_blocking=True)
-            torch.bmm(G, plan["inv_fc"], out=G)
+            out = plan["tmp_fc"] if instrument else G
+            torch.bmm(G, plan["inv_fc"], out=out)
+            if instrument:
+                for i, p in enumerate(plan["fc_params"]):
+                    self._record_and_blend_(p, G[i], out[i], "c_fc")
             for i, p in enumerate(plan["fc_params"]):
                 if p.grad is not None:
-                    p.grad.copy_(G[i], non_blocking=True)
+                    p.grad.copy_(out[i], non_blocking=True)
 
         if plan["g_proj"] is not None:
             Gp = plan["g_proj"]
@@ -242,6 +377,8 @@ class Muon(torch.optim.Optimizer):
                     Gp[i].zero_()
                 else:
                     Gp[i].copy_(p.grad, non_blocking=True)
+            if instrument:
+                plan["tmp_proj_raw"].copy_(Gp)
 
             n = Gp.size(0)
 
@@ -254,6 +391,9 @@ class Muon(torch.optim.Optimizer):
 
             src_out = plan["tmp_proj_blocks"].view(n, 4, d, d).permute(0, 2, 1, 3)  # [n,d,4,d]
             Gp.view(n, d, 4, d).copy_(src_out)
+            if instrument:
+                for i, p in enumerate(plan["proj_params"]):
+                    self._record_and_blend_(p, plan["tmp_proj_raw"][i], Gp[i], "c_proj")
 
             for i, p in enumerate(plan["proj_params"]):
                 if p.grad is not None:
@@ -270,6 +410,7 @@ class Muon(torch.optim.Optimizer):
         for p, stref in self._iter_params_with_stats_():
             kind = stref["kind"]
             self._init_precond_state_for_param_(p, stref)
+            st = self.state[p]
 
             if kind in ("qkv", "o", "c_fc"):
                 refresh_map.append((p, kind, -1))
@@ -278,12 +419,16 @@ class Muon(torch.optim.Optimizer):
                     refresh_map.append((p, kind, j))
 
             if kind == "qkv":
+                st.setdefault("precond_label", f"qkv_{len(qkv_params):02d}")
                 qkv_params.append(p)
             elif kind == "o":
+                st.setdefault("precond_label", f"o_{len(o_params):02d}")
                 o_params.append(p)
             elif kind == "c_fc":
+                st.setdefault("precond_label", f"c_fc_{len(fc_params):02d}")
                 fc_params.append(p)
             elif kind == "c_proj":
+                st.setdefault("precond_label", f"c_proj_{len(proj_params):02d}")
                 proj_params.append(p)
 
         self._refresh_map = refresh_map
@@ -302,6 +447,8 @@ class Muon(torch.optim.Optimizer):
                 return None
             return torch.empty((n, out_mult * d, d), device=dev, dtype=torch.float32)
 
+        needs_tmp = self.trust_enabled or bool(self.telemetry_path)
+
         plan = {
             "d": d,
             "qkv_params": qkv_params,
@@ -312,12 +459,16 @@ class Muon(torch.optim.Optimizer):
             "g_qkv": alloc_grad_buf(qkv_params, 3),
             "g_o":   alloc_grad_buf(o_params,   1),
             "g_fc":  alloc_grad_buf(fc_params,  4),
+            "tmp_qkv": alloc_grad_buf(qkv_params, 3) if needs_tmp else None,
+            "tmp_o":   alloc_grad_buf(o_params,   1) if needs_tmp else None,
+            "tmp_fc":  alloc_grad_buf(fc_params,  4) if needs_tmp else None,
 
             "inv_qkv": torch.empty((len(qkv_params), d, d), device=dev, dtype=torch.float32) if qkv_params else None,
             "inv_o":   torch.empty((len(o_params),   d, d), device=dev, dtype=torch.float32) if o_params else None,
             "inv_fc":  torch.empty((len(fc_params),  d, d), device=dev, dtype=torch.float32) if fc_params else None,
 
             "g_proj": torch.empty((len(proj_params), d, 4 * d), device=dev, dtype=torch.float32) if proj_params else None,
+            "tmp_proj_raw": torch.empty((len(proj_params), d, 4 * d), device=dev, dtype=torch.float32) if needs_tmp and proj_params else None,
             "inv_proj4": torch.empty((len(proj_params), 4, d, d), device=dev, dtype=torch.float32) if proj_params else None,
             "tmp_proj_blocks": torch.empty((len(proj_params) * 4, d, d), device=dev, dtype=torch.float32) if proj_params else None,
             "tmp_blocks_in":   torch.empty((len(proj_params) * 4, d, d), device=dev, dtype=torch.float32) if proj_params else None,
@@ -397,6 +548,10 @@ class Muon(torch.optim.Optimizer):
                 K[bad].zero_()
                 K[bad].diagonal(dim1=-2, dim2=-1).fill_(1.0)
 
+        if self.scale_invariant:
+            inv_diag_mean = K.diagonal(dim1=-2, dim2=-1).mean(dim=-1).clamp_min(1e-12)
+            K.div_(inv_diag_mean[:, None, None])
+
         for i, (p, kind, sub) in enumerate(self._refresh_map):
             st = self.state[p]
             inv_i = K[i]
@@ -410,15 +565,23 @@ class Muon(torch.optim.Optimizer):
         since = max(0, int(self.global_step) - int(self._regime_step))
         t = since + 1
         do_inverse = bool(self._precond_attached and do_refresh)
+        self._telemetry_do_refresh = bool(do_refresh)
 
-        if self._precond_attached and do_refresh:
+        def refresh_and_reset():
             self._finalize_precond_buffers_()
             self._refresh_precond_all_batched_(do_inverse=do_inverse, precond_ewma=precond_ewma)
             for _, stref in self._iter_params_with_stats_():
                 stref["accum"].zero_()
                 stref["count"].zero_()
 
-        self._apply_precond_all_grads_batched_()
+        if self.lagged_preconditioner:
+            self._apply_precond_all_grads_batched_()
+            if self._precond_attached and do_refresh:
+                refresh_and_reset()
+        else:
+            if self._precond_attached and do_refresh:
+                refresh_and_reset()
+            self._apply_precond_all_grads_batched_()
 
         for group in self.param_groups:
             lr = group['lr'] * lr_mult

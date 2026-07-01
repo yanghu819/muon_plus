@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from pathlib import Path
 
 import torch
@@ -16,7 +18,29 @@ def load_muon_class():
     src = SOURCE.read_text()
     start = src.index("class Muon(torch.optim.Optimizer):")
     end = src.index("# -----------------------------------------------------------------------------\n# PyTorch nn.Module definitions")
-    ns = {"torch": torch, "Tensor": Tensor}
+    def _env_flag(name: str, default: bool = False) -> bool:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() not in ("", "0", "false", "no", "off")
+
+    def _env_float(name: str, default: float) -> float:
+        value = os.environ.get(name)
+        return default if value is None else float(value)
+
+    def _env_int(name: str, default: int) -> int:
+        value = os.environ.get(name)
+        return default if value is None else int(value)
+
+    ns = {
+        "torch": torch,
+        "Tensor": Tensor,
+        "json": json,
+        "os": os,
+        "_env_flag": _env_flag,
+        "_env_float": _env_float,
+        "_env_int": _env_int,
+    }
     exec(src[start:end], ns)
     return ns["Muon"]
 

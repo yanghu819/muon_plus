@@ -64,6 +64,19 @@ def patch_resumable_full_1(text: str) -> str:
             break
     if not save_every_replaced:
         raise SystemExit("could not find save_every hyperparameter")
+    for old, new in (
+        ("num_iterations : int = 6200", "num_iterations : int = int(os.environ.get(\"NUM_ITERATIONS\", \"6200\"))"),
+        ("warmdown_iters : int = 1800", "warmdown_iters : int = int(os.environ.get(\"WARMDOWN_ITERS\", \"1800\"))"),
+        ("val_loss_every : int = 100", "val_loss_every : int = int(os.environ.get(\"VAL_LOSS_EVERY\", \"100\"))"),
+        ("val_tokens : int = 10485760", "val_tokens : int = int(os.environ.get(\"VAL_TOKENS\", \"10485760\"))"),
+    ):
+        if old in text:
+            text = replace_once(text, old, new)
+    text = replace_once(
+        text,
+        "elif it < args.num_iterations - args.warmdown_iters:",
+        "elif args.warmdown_iters <= 0 or it < args.num_iterations - args.warmdown_iters:",
+    )
     text = replace_once(
         text,
         "    def next_batch(self):\n"
