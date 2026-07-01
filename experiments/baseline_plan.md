@@ -233,6 +233,8 @@ now supports a mechanism-first Newton-Muon++ harness with defaults unchanged:
   separate coordinate correction from hidden global learning-rate changes.
 - `NEWMUON_LAGGED=1` applies the previous preconditioner to the current
   gradient, then refreshes `P` for future steps.
+- `NEWMUON_LITE_DIAG=1` keeps only the activation covariance diagonal before
+  inversion. This is the quick "is full covariance actually necessary?" probe.
 
 The first required experiment is telemetry-only, not an algorithm change:
 run `newton_muon1` for 128-300 steps on GPU2 with full model/data and a reduced

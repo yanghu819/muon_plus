@@ -155,6 +155,7 @@ class Muon(torch.optim.Optimizer):
         self.trust_enabled = _env_flag("NEWMUON_TRUST", False)
         self.scale_invariant = _env_flag("NEWMUON_SCALE_INVARIANT", False)
         self.lagged_preconditioner = _env_flag("NEWMUON_LAGGED", False)
+        self.lite_diag = _env_flag("NEWMUON_LITE_DIAG", False)
         self.trust_alpha_max = _env_float("NEWMUON_TRUST_ALPHA_MAX", 1.0)
         self.trust_cos_min = _env_float("NEWMUON_TRUST_COS_MIN", 0.0)
         self.trust_cos_full = _env_float("NEWMUON_TRUST_COS_FULL", 0.5)
@@ -270,6 +271,7 @@ class Muon(torch.optim.Optimizer):
                 "lagged": bool(self.lagged_preconditioner),
                 "trust_enabled": bool(self.trust_enabled),
                 "scale_invariant": bool(self.scale_invariant),
+                "lite_diag": bool(self.lite_diag),
                 "alpha": alpha,
                 "grad_norm": float(raw_norm.item()),
                 "precond_grad_norm": float(pre_norm.item()),
@@ -539,14 +541,19 @@ class Muon(torch.optim.Optimizer):
         ridge = (diag.sum(dim=-1) / float(d)) * self.precond_ridge_mult + self.precond_eps
         diag.add_(ridge.unsqueeze(-1))
 
-        L, info = torch.linalg.cholesky_ex(K, upper=False, check_errors=False)
-        torch.cholesky_inverse(L, upper=False, out=K)
+        if self.lite_diag:
+            inv_diag = diag.reciprocal()
+            K.zero_()
+            K.diagonal(dim1=-2, dim2=-1).copy_(inv_diag)
+        else:
+            L, info = torch.linalg.cholesky_ex(K, upper=False, check_errors=False)
+            torch.cholesky_inverse(L, upper=False, out=K)
 
-        if info.numel() == K.size(0):
-            bad = info != 0
-            if bad.any():
-                K[bad].zero_()
-                K[bad].diagonal(dim1=-2, dim2=-1).fill_(1.0)
+            if info.numel() == K.size(0):
+                bad = info != 0
+                if bad.any():
+                    K[bad].zero_()
+                    K[bad].diagonal(dim1=-2, dim2=-1).fill_(1.0)
 
         if self.scale_invariant:
             inv_diag_mean = K.diagonal(dim1=-2, dim2=-1).mean(dim=-1).clamp_min(1e-12)
