@@ -7,6 +7,9 @@
 - seed: 1337
 - status: in_progress
 - worktree: `/huyang2/muon_plus/_worktrees/hybrid_3fb689d`
+- actual_started_at: `2026-07-02T05:26:38Z`
+- pid: `10897`
+- launcher_log: `/huyang2/muon_plus/artifacts/2026-07-02T05-20-30Z-newton_full_trust-1200-control-3fb689d.launcher.log`
 
 ## Hypothesis
 
