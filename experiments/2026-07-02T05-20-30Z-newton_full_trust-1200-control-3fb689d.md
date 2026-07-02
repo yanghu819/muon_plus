@@ -5,7 +5,7 @@
 - git_sha: 3fb689df25faec35cce414fdb494150a362d4caa
 - machine: AIStation GPU2, NVIDIA A800-SXM4-80GB
 - seed: 1337
-- status: in_progress
+- status: interrupted
 - worktree: `/huyang2/muon_plus/_worktrees/hybrid_3fb689d`
 - actual_started_at: `2026-07-02T05:26:38Z`
 - pid: `10897`
@@ -51,16 +51,18 @@ NEWMUON_TELEMETRY_MAX_STEP=1200 \
 
 - step 300 val_loss: `4.3795`
 - step 600 val_loss: `3.9196`
+- interrupted_after: approximately step `623`
+- interruption: AIStation GPU2 lease expired / environment halted; no exit file
+- checkpoint_resume: not available (`SAVE_EVERY=0`)
 
 ## Decision
 
-Step 600 keeps the temporal schedule ahead. Step 300 matched the expected full
+Interrupted after step 600 by AIStation environment halt, so this run cannot be
+used as the same-horizon final control. Step 600 still kept the temporal
+schedule ahead. Step 300 matched the expected full
 Trust early weakness: this control landed near the previous full Trust 900-run
 step-300 value (`4.3810`) and clearly behind lite256's early points (`4.3690`
 in the 1200 extension, `4.3667` in the 300 gate). Step 600 is also worse than
 lite256 (`3.9196` vs `3.9162`) and slightly worse than the old full Trust
-900-run step-600 value (`3.9184`). Continue to 900/1200; the strict final
-interpretation is unchanged. If full Trust is `<= 3.6895` at step 1200, the
-temporal schedule is not worth a full 6200-step promotion. If full Trust is
-worse than `3.6895`, promote one lite256 full-length run and use telemetry for
-the paper mechanism story.
+900-run step-600 value (`3.9184`). Because `SAVE_EVERY=0`, resume is not
+possible; launch one fresh 1200-step control after GPU2 restart.
