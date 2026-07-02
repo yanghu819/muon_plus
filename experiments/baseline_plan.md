@@ -356,3 +356,11 @@ promote Lite+Adaptive to a full 6200-step run. The next high-ROI question is
 whether the adaptive gate is still useful when applied to the full covariance
 preconditioner rather than the diagonal-only Lite preconditioner. That run is
 `2026-07-02T01-55-45Z-newton_full_adaptive-900-b03a6791`.
+
+The full-cov Layer-Adaptive run was early-pruned at step 300 with val
+`4.3888`. This was already worse than the Lite+Adaptive 300-step value
+`4.3651`, the Lite diagonal 300-step value `4.3811`, and the earlier full-cov
+Trust 300-step point `4.3746`. Continuing to 900 would mostly spend compute to
+confirm a dominated direction, so it was stopped. The next run is the
+fixed-seed current-code full Trust anchor:
+`2026-07-02T02-12-58Z-newton_full_trust-900-b03a6791`.
