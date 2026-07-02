@@ -50,13 +50,17 @@ NEWMUON_TELEMETRY_MAX_STEP=1200 \
 ## Results
 
 - step 300 val_loss: `4.3795`
+- step 600 val_loss: `3.9196`
 
 ## Decision
 
-Step 300 matches the expected full Trust early weakness: this control lands near
-the previous full Trust 900-run step-300 value (`4.3810`) and clearly behind
-lite256's early points (`4.3690` in the 1200 extension, `4.3667` in the 300
-gate). Continue to 600/900/1200; the strict final interpretation is unchanged.
-If full Trust is `<= 3.6895` at step 1200, the temporal schedule is not worth a
-full 6200-step promotion. If full Trust is worse than `3.6895`, promote one
-lite256 full-length run and use telemetry for the paper mechanism story.
+Step 600 keeps the temporal schedule ahead. Step 300 matched the expected full
+Trust early weakness: this control landed near the previous full Trust 900-run
+step-300 value (`4.3810`) and clearly behind lite256's early points (`4.3690`
+in the 1200 extension, `4.3667` in the 300 gate). Step 600 is also worse than
+lite256 (`3.9196` vs `3.9162`) and slightly worse than the old full Trust
+900-run step-600 value (`3.9184`). Continue to 900/1200; the strict final
+interpretation is unchanged. If full Trust is `<= 3.6895` at step 1200, the
+temporal schedule is not worth a full 6200-step promotion. If full Trust is
+worse than `3.6895`, promote one lite256 full-length run and use telemetry for
+the paper mechanism story.
