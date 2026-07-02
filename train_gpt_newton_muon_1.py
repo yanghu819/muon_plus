@@ -162,6 +162,8 @@ class Muon(torch.optim.Optimizer):
         self.sketch_rank = _env_int("NEWMUON_SKETCH_RANK", 0)
         kind_mask = os.environ.get("NEWMUON_KIND_MASK", "").strip()
         self.kind_mask = None if not kind_mask else {x.strip() for x in kind_mask.split(",") if x.strip()}
+        kind_lite_mask = os.environ.get("NEWMUON_KIND_LITE_MASK", "").strip()
+        self.kind_lite_mask = None if not kind_lite_mask else {x.strip() for x in kind_lite_mask.split(",") if x.strip()}
         self.layer_adaptive = _env_flag("NEWMUON_LAYER_ADAPTIVE", False)
         self.adaptive_cos_min = _env_float("NEWMUON_ADAPTIVE_COS_MIN", 0.25)
         self.adaptive_cos_full = _env_float("NEWMUON_ADAPTIVE_COS_FULL", 0.8)
@@ -312,6 +314,7 @@ class Muon(torch.optim.Optimizer):
                 "low_rank_rank": int(self.low_rank_rank),
                 "sketch_rank": int(self.sketch_rank),
                 "kind_mask": "" if self.kind_mask is None else ",".join(sorted(self.kind_mask)),
+                "kind_lite_mask": "" if self.kind_lite_mask is None else ",".join(sorted(self.kind_lite_mask)),
                 "layer_adaptive": bool(self.layer_adaptive),
                 "alpha": alpha,
                 "grad_norm": float(raw_norm.item()),
@@ -586,6 +589,15 @@ class Muon(torch.optim.Optimizer):
         diag = K.diagonal(dim1=-2, dim2=-1)
         ridge = (diag.sum(dim=-1) / float(d)) * self.precond_ridge_mult + self.precond_eps
         diag.add_(ridge.unsqueeze(-1))
+        ridged_diag = diag.clone()
+
+        kind_lite_rows = None
+        if self.kind_lite_mask is not None:
+            kind_lite_rows = torch.tensor(
+                [kind in self.kind_lite_mask for _, kind, _ in self._refresh_map],
+                device=K.device,
+                dtype=torch.bool,
+            )
 
         if self._lite_diag_active_():
             inv_diag = diag.reciprocal()
@@ -629,6 +641,11 @@ class Muon(torch.optim.Optimizer):
                 if bad.any():
                     K[bad].zero_()
                     K[bad].diagonal(dim1=-2, dim2=-1).fill_(1.0)
+
+        if kind_lite_rows is not None and kind_lite_rows.any():
+            inv_diag = ridged_diag[kind_lite_rows].reciprocal()
+            K[kind_lite_rows].zero_()
+            K[kind_lite_rows].diagonal(dim1=-2, dim2=-1).copy_(inv_diag)
 
         if self.scale_invariant:
             inv_diag_mean = K.diagonal(dim1=-2, dim2=-1).mean(dim=-1).clamp_min(1e-12)
