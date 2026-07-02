@@ -339,3 +339,20 @@ is rejected because `qkv/c_fc` only regresses to `4.4118`, meaning `o/c_proj`
 still carry useful signal. Low-rank and random sketch are rejected for now:
 their 300-step losses are worse than Lite and do not justify a scalability
 story until the gated diagonal family is pushed further.
+
+## 2026-07-02 Lite-Adaptive 900-Step Gate
+
+Run `2026-07-01T11-34-40Z-newton_lite_adaptive-900-b03a6791` tested whether
+the 300-step winner scales to a longer decision horizon. The validation curve
+was:
+
+- step 300: `4.3651`
+- step 600: `3.9193`
+- step 900: `3.7817`
+
+This is a real improvement over the 300-step Lite family, but it does not beat
+the earlier full-cov Trust partial run at step 900 (`3.7713`). Decision: do not
+promote Lite+Adaptive to a full 6200-step run. The next high-ROI question is
+whether the adaptive gate is still useful when applied to the full covariance
+preconditioner rather than the diagonal-only Lite preconditioner. That run is
+`2026-07-02T01-55-45Z-newton_full_adaptive-900-b03a6791`.
