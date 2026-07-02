@@ -156,6 +156,7 @@ class Muon(torch.optim.Optimizer):
         self.scale_invariant = _env_flag("NEWMUON_SCALE_INVARIANT", False)
         self.lagged_preconditioner = _env_flag("NEWMUON_LAGGED", False)
         self.lite_diag = _env_flag("NEWMUON_LITE_DIAG", False)
+        self.lite_until_step = _env_int("NEWMUON_LITE_UNTIL_STEP", -1)
         self.low_rank = _env_flag("NEWMUON_LOW_RANK", False)
         self.low_rank_rank = _env_int("NEWMUON_LOW_RANK_K", 64)
         self.sketch_rank = _env_int("NEWMUON_SKETCH_RANK", 0)
@@ -178,6 +179,8 @@ class Muon(torch.optim.Optimizer):
         since = max(0, int(step) - int(self._regime_step))
         t = since + 1
         do_refresh = (t % 32 == 0)
+        if self.lite_until_step > 0 and int(step) == self.lite_until_step:
+            do_refresh = True
         precond_ewma = 0.950
 
         ramp = float(self.lr_mult_ramp_steps)
@@ -188,6 +191,11 @@ class Muon(torch.optim.Optimizer):
             lr_mult = 1.0 + (self.lr_mult_max - 1.0) * frac
 
         return bool(do_refresh), float(precond_ewma), float(lr_mult)
+
+    def _lite_diag_active_(self) -> bool:
+        if self.lite_diag:
+            return True
+        return self.lite_until_step > 0 and int(self.global_step) < int(self.lite_until_step)
 
     def precond_flag_for_step(self, step: int) -> bool:
         do_refresh, _, _ = self._regime_schedule_(int(step))
@@ -297,7 +305,9 @@ class Muon(torch.optim.Optimizer):
                 "lagged": bool(self.lagged_preconditioner),
                 "trust_enabled": bool(self.trust_enabled),
                 "scale_invariant": bool(self.scale_invariant),
-                "lite_diag": bool(self.lite_diag),
+                "lite_diag": bool(self._lite_diag_active_()),
+                "lite_diag_flag": bool(self.lite_diag),
+                "lite_until_step": int(self.lite_until_step),
                 "low_rank": bool(self.low_rank),
                 "low_rank_rank": int(self.low_rank_rank),
                 "sketch_rank": int(self.sketch_rank),
@@ -577,7 +587,7 @@ class Muon(torch.optim.Optimizer):
         ridge = (diag.sum(dim=-1) / float(d)) * self.precond_ridge_mult + self.precond_eps
         diag.add_(ridge.unsqueeze(-1))
 
-        if self.lite_diag:
+        if self._lite_diag_active_():
             inv_diag = diag.reciprocal()
             K.zero_()
             K.diagonal(dim1=-2, dim2=-1).copy_(inv_diag)
