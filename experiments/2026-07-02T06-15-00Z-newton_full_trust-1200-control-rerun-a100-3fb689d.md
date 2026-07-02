@@ -5,7 +5,7 @@
 - git_sha: 3fb689df25faec35cce414fdb494150a362d4caa
 - machine: AIStation GPU2, NVIDIA A100-SXM4-80GB
 - seed: 1337
-- status: in_progress
+- status: completed
 - worktree: `/huyang2/muon_plus/_worktrees/hybrid_3fb689d`
 - actual_started_at: `2026-07-02T06:14:46Z`
 - pid: `165`
@@ -52,16 +52,23 @@ NEWMUON_TELEMETRY_MAX_STEP=1200 \
 - step 300 val_loss: `4.3811`
 - step 600 val_loss: `3.9177`
 - step 900 val_loss: `3.7756`
+- step 1200 val_loss: `3.6919`
+- train_time_s: `2975.242`
+- peak_memory_mib: `39448`
+- finished_at: `2026-07-02T07:08:47Z`
 
 ## Decision
 
-Step 900 reverses the early Lite256 advantage. Step 300 reproduced full
+Completed. Step 900 reversed the early Lite256 advantage. Step 300 reproduced full
 Trust's known early weakness despite the restarted A100 instance: it matched the
 prior full Trust 900-run step-300 value (`4.3810`) and the interrupted control
 (`4.3795`), while trailing Lite256 (`4.3690` in the 1200 extension, `4.3667` in
 the 300 gate). Step 600 was also behind Lite256 (`3.9177` vs `3.9162`), but only
 by `0.0015`. By step 900, full Trust is better than the lite256 1200 extension
 (`3.7756` vs `3.7767`) and slightly better than the prior lite256 900 run
-(`3.7762`). Continue to 1200 for the same-horizon final, but the promotion
-burden now shifts against Lite256: unless the 1200 final unexpectedly returns
-the advantage, do not promote a 6200-step temporal-schedule run.
+(`3.7762`). At step 1200, full Trust ends at `3.6919`, worse than the A800
+Lite256 extension final `3.6895` by `0.0024`. That is a real promotion signal if
+hardware is ignored, but the margin is small and this control ran on the
+restarted A100 instance. Do not promote directly to 6200 yet. Launch one
+A100-side Lite256 1200 mirror; if it beats this full Trust control on the same
+hardware, promote a single 6200-step Lite256 run.
